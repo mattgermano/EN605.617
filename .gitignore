@@ -33,3 +33,7 @@
 
 .DS_Store
 .DS_Store?
+
+build/
+.assignment_status.env
+assignment_output.txt

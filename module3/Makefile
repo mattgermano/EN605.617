@@ -1,2 +1,3 @@
-all: assignment.c
-	gcc assignment.c -o assignment.exe
+all: assignment.cu
+	mkdir -p build
+	nvcc assignment.cu -o build/assignment.exe

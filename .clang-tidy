@@ -1,0 +1,35 @@
+---
+Checks:
+  - clang-diagnostic-*
+  - bugprone-*
+  - performance-*
+  - cert-*
+  - cppcoreguidelines-*
+  - misc-*
+  - modernize-*
+  - portability-*
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic
+  - -misc-use-internal-linkage
+  - -bugprone-easily-swappable-parameters
+  - -cppcoreguidelines-avoid-magic-numbers
+  - -modernize-use-trailing-return-type
+WarningsAsErrors: ''
+HeaderFileExtensions:
+  - ''
+  - h
+  - hh
+  - hpp
+  - hxx
+  - cuh
+ImplementationFileExtensions:
+  - c
+  - cc
+  - cpp
+  - cxx
+  - cu
+HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: ''
+FormatStyle:     none
+CheckOptions:    {}
+SystemHeaders:   false
+...

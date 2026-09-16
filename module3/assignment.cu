@@ -242,16 +242,16 @@ __global__ void gpu_lla2ecef_branching(const LLACoordinate *__restrict__ lla,
 float time_gpu_kernel(LLACoordinate *d_lla, ECEFCoordinate *d_ecef,
                       std::size_t length, unsigned int num_blocks,
                       unsigned int block_size, bool branching = false,
-                      std::size_t warmup_count = 20,
-                      std::size_t run_count = 100) {
+                      std::size_t warmup_count = 1, std::size_t run_count = 5) {
   // Create events used to time kernel execution
   cudaEvent_t start_gpu = nullptr, stop_gpu = nullptr;
   checkCudaErrors(cudaEventCreate(&start_gpu));
   checkCudaErrors(cudaEventCreate(&stop_gpu));
   float gpu_elapsed_ms = 0.0f;
 
-  // Warms up the GPU if it's in a low power state to ensure the first execution
-  // logged is not substantially slower than the rest of the kernel executions
+  // "Warm-up" the kernel to mitigate the effects of lazy loading and
+  // initialization.
+  // https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html#impact-on-performance-measurements
   for (std::size_t i = 0; i < warmup_count; ++i) {
     if (branching) {
       gpu_lla2ecef_branching<<<num_blocks, block_size>>>(d_lla, d_ecef, length);

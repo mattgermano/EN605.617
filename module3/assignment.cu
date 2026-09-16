@@ -19,6 +19,7 @@
 #include <numbers>
 #include <random>
 #include <source_location>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -37,7 +38,7 @@ checkCudaErrors(cudaError_t result,
   // Reference documentation:
   // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#error-checking-in-cuda
   // Reference code:
-// https://github.com/NVIDIA/cuda-samples/blob/5443602d89ed99aede2e4b7bf329daddeadb320e/Common/helper_cuda.h#L585-L598
+  // https://github.com/NVIDIA/cuda-samples/blob/5443602d89ed99aede2e4b7bf329daddeadb320e/Common/helper_cuda.h#L585-L598
   if (result != cudaSuccess) {
     std::cerr << std::format(
         "CUDA Runtime Error: {}:{}:{} = {}\n", loc.file_name(), loc.line(),
@@ -338,9 +339,17 @@ int main(int argc, char **argv) {
   // BEGIN: Initialize
   // ----------------------------------------------------------------
 
-  // Host vectors
-  std::vector<LLACoordinate> h_lla(total_threads);
-  std::vector<ECEFCoordinate> h_ecef(total_threads);
+  // Allocate host vectors
+  //
+  // The CUDA programming guide recommends using cudaMallocHost when buffers
+  // will be used to copy data between CPU and GPU memory.
+  // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#explicit-memory-management
+  LLACoordinate *h_lla = nullptr;
+  ECEFCoordinate *h_ecef = nullptr;
+  checkCudaErrors(
+      cudaMallocHost(&h_lla, total_threads * sizeof(LLACoordinate)));
+  checkCudaErrors(
+      cudaMallocHost(&h_ecef, total_threads * sizeof(ECEFCoordinate)));
 
   // Use the same random number generator seed so the results are the same
   // between runs
@@ -352,23 +361,23 @@ int main(int argc, char **argv) {
 
   // Initialize the LLA coordinates where half of the coordinates are in the
   // northern hemisphere and half are in the southern hemisphere
-  for (std::size_t i = 0; i < h_lla.size(); ++i) {
-    h_lla[i] = {.lat_deg = (i < h_lla.size() / 2) ? lat_n(gen) : lat_s(gen),
+  for (std::size_t i = 0; i < total_threads; ++i) {
+    h_lla[i] = {.lat_deg = (i < total_threads / 2) ? lat_n(gen) : lat_s(gen),
                 .lon_deg = lon(gen),
                 .alt_m = 435.0};
   }
 
-  // Device vectors
+  // Allocate device vectors
   LLACoordinate *d_lla = nullptr;
   ECEFCoordinate *d_ecef = nullptr;
 
-  checkCudaErrors(cudaMalloc(&d_lla, h_lla.size() * sizeof(LLACoordinate)));
-  checkCudaErrors(cudaMalloc(&d_ecef, h_ecef.size() * sizeof(ECEFCoordinate)));
+  checkCudaErrors(cudaMalloc(&d_lla, total_threads * sizeof(LLACoordinate)));
+  checkCudaErrors(cudaMalloc(&d_ecef, total_threads * sizeof(ECEFCoordinate)));
   // Zeroing memory to initialize all elements
   checkCudaErrors(
-      cudaMemset(d_ecef, 0, h_ecef.size() * sizeof(ECEFCoordinate)));
-  checkCudaErrors(cudaMemcpy(d_lla, h_lla.data(),
-                             h_lla.size() * sizeof(LLACoordinate),
+      cudaMemset(d_ecef, 0, total_threads * sizeof(ECEFCoordinate)));
+  checkCudaErrors(cudaMemcpy(d_lla, h_lla,
+                             total_threads * sizeof(LLACoordinate),
                              cudaMemcpyHostToDevice));
 
   // ----------------------------------------------------------------
@@ -386,8 +395,8 @@ int main(int argc, char **argv) {
                            "(non-branching): {:.6f} ms\n",
                            gpu_elapsed_ms);
 
-  checkCudaErrors(cudaMemcpy(h_ecef.data(), d_ecef,
-                             h_ecef.size() * sizeof(ECEFCoordinate),
+  checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
+                             total_threads * sizeof(ECEFCoordinate),
                              cudaMemcpyDeviceToHost));
 
   // ----------------------------------------------------------------
@@ -399,7 +408,7 @@ int main(int argc, char **argv) {
   // ----------------------------------------------------------------
 
   auto start_cpu = std::chrono::steady_clock::now();
-  cpu_lla2ecef(h_lla.data(), h_ecef.data(), total_threads);
+  cpu_lla2ecef(h_lla, h_ecef, total_threads);
   auto stop_cpu = std::chrono::steady_clock::now();
   auto cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
@@ -423,15 +432,16 @@ int main(int argc, char **argv) {
                            "(branching, sorted): {:.6f} ms\n",
                            gpu_elapsed_ms);
 
-  checkCudaErrors(cudaMemcpy(h_ecef.data(), d_ecef,
-                             h_ecef.size() * sizeof(ECEFCoordinate),
+  checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
+                             total_threads * sizeof(ECEFCoordinate),
                              cudaMemcpyDeviceToHost));
 
   // Shuffle the coordinates to cause a branching penalty since the
   // northern/southern hemisphere coordinates are now mixed together within a
   // warp (whereas before they were contiguously grouped)
-  std::vector<LLACoordinate> shuffled = h_lla;
-  std::shuffle(shuffled.begin(), shuffled.end(), gen);
+  std::span<LLACoordinate> h_lla_span(h_lla, total_threads);
+  std::vector<LLACoordinate> shuffled(h_lla_span.begin(), h_lla_span.end());
+  std::ranges::shuffle(shuffled, gen);
   checkCudaErrors(cudaMemcpy(d_lla, shuffled.data(),
                              shuffled.size() * sizeof(LLACoordinate),
                              cudaMemcpyHostToDevice));
@@ -443,8 +453,8 @@ int main(int argc, char **argv) {
                            "(branching, shuffled): {:.6f} ms\n",
                            gpu_elapsed_ms);
 
-  checkCudaErrors(cudaMemcpy(h_ecef.data(), d_ecef,
-                             h_ecef.size() * sizeof(ECEFCoordinate),
+  checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
+                             total_threads * sizeof(ECEFCoordinate),
                              cudaMemcpyDeviceToHost));
 
   // ----------------------------------------------------------------
@@ -456,7 +466,7 @@ int main(int argc, char **argv) {
   // ----------------------------------------------------------------
 
   start_cpu = std::chrono::steady_clock::now();
-  cpu_lla2ecef_branching(h_lla.data(), h_ecef.data(), total_threads);
+  cpu_lla2ecef_branching(h_lla, h_ecef, total_threads);
   stop_cpu = std::chrono::steady_clock::now();
   cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
@@ -466,7 +476,7 @@ int main(int argc, char **argv) {
       cpu_elapsed_ms.count());
 
   start_cpu = std::chrono::steady_clock::now();
-  cpu_lla2ecef_branching(shuffled.data(), h_ecef.data(), total_threads);
+  cpu_lla2ecef_branching(shuffled.data(), h_ecef, total_threads);
   stop_cpu = std::chrono::steady_clock::now();
   cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
@@ -483,6 +493,8 @@ int main(int argc, char **argv) {
   // BEGIN: Cleanup
   // ----------------------------------------------------------------
 
+  checkCudaErrors(cudaFreeHost(h_lla));
+  checkCudaErrors(cudaFreeHost(h_ecef));
   checkCudaErrors(cudaFree(d_lla));
   checkCudaErrors(cudaFree(d_ecef));
 

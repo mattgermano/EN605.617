@@ -116,9 +116,9 @@ void cpu_lla2ecef(const LLACoordinate *lla, ECEFCoordinate *ecef,
 
 //!
 //! @brief Converts an array of LLA (latitude, longitude, altitude) coordinates
-//! to ECEF (earth-centered, earth-fixed) coordinates and re-converts the
-//! z-position back to altitude if the coordinate is in the northern hemisphere
-//! on the CPU
+//! to ECEF (earth-centered, earth-fixed) coordinates and re-converts back
+//! to geodetic latitude if the coordinate is in the northern hemisphere on
+//! the CPU
 //!
 //! @param[in]  lla  An array of LLA coordinates
 //! @param[out] ecef An array of ECEF coordinates
@@ -159,8 +159,11 @@ void cpu_lla2ecef_branching(const LLACoordinate *lla, ECEFCoordinate *ecef,
 //! @param[in]  lla  An array of LLA coordinates
 //! @param[out] ecef An array of ECEF coordinates
 //! @param[in]  num_coordinates The number of input/output coordinates
+//! @sa __restrict__ optimization
+//! https://developer.nvidia.com/blog/cuda-pro-tip-optimize-pointer-aliasing/
 //!
-__global__ void gpu_lla2ecef(const LLACoordinate *lla, ECEFCoordinate *ecef,
+__global__ void gpu_lla2ecef(const LLACoordinate *__restrict__ lla,
+                             ECEFCoordinate *__restrict__ ecef,
                              std::size_t num_coordinates) {
   const unsigned int thread_idx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -179,16 +182,18 @@ __global__ void gpu_lla2ecef(const LLACoordinate *lla, ECEFCoordinate *ecef,
 
 //!
 //! @brief Converts an array of LLA (latitude, longitude, altitude) coordinates
-//! to ECEF (earth-centered, earth-fixed) coordinates and re-converts the
-//! z-position back to altitude if the coordinate is in the northern hemisphere
-//! on the GPU
+//! to ECEF (earth-centered, earth-fixed) coordinates and re-converts back
+//! to geodetic latitude if the coordinate is in the northern hemisphere on
+//! the GPU
 //!
 //! @param[in]  lla  An array of LLA coordinates
 //! @param[out] ecef An array of ECEF coordinates
 //! @param[in]  num_coordinates The number of input/output coordinates
+//! @sa __restrict__ optimization
+//! https://developer.nvidia.com/blog/cuda-pro-tip-optimize-pointer-aliasing/
 //!
-__global__ void gpu_lla2ecef_branching(const LLACoordinate *lla,
-                                       ECEFCoordinate *ecef,
+__global__ void gpu_lla2ecef_branching(const LLACoordinate *__restrict__ lla,
+                                       ECEFCoordinate *__restrict__ ecef,
                                        std::size_t num_coordinates) {
   const unsigned int thread_idx = (blockIdx.x * blockDim.x) + threadIdx.x;
 

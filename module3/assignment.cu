@@ -18,32 +18,34 @@
 #include <iostream>
 #include <numbers>
 #include <random>
+#include <source_location>
 #include <string>
 #include <vector>
 
 // Maximum number of CUDA blocks in the X-dimension
 static constexpr long long MAX_BLOCKS = 2147483647LL;
 
-// check() is taken from the helper_cuda.h file in the cuda-samples repository
+//!
+//! @brief Helper function for checking for CUDA errors
+//!
+//! @param result The result of a CUDA API call
+//! @param loc    The source code location of the function call
+//!
+inline void
+checkCudaErrors(cudaError_t result,
+                std::source_location loc = std::source_location::current()) {
+  // Reference documentation:
+  // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#error-checking-in-cuda
+  // Reference code:
 // https://github.com/NVIDIA/cuda-samples/blob/5443602d89ed99aede2e4b7bf329daddeadb320e/Common/helper_cuda.h#L585-L598
-// Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
-template <typename T>
-void check(T result, char const *const func, const char *const file,
-           int const line) {
-  if (result) {
-    std::cerr << std::format("CUDA error at {}:{} code={} \"{}\" \n", file,
-                             line, static_cast<unsigned int>(result), func);
+  if (result != cudaSuccess) {
+    std::cerr << std::format(
+        "CUDA Runtime Error: {}:{}:{} = {}\n", loc.file_name(), loc.line(),
+        static_cast<int>(result), cudaGetErrorString(result));
     cudaDeviceReset();
-    // Make sure we call CUDA Device Reset before exiting
     exit(EXIT_FAILURE);
   }
 }
-
-// checkCudaErrors() is taken from the helper_cuda.h file in the cuda-samples
-// repository
-// https://github.com/NVIDIA/cuda-samples/blob/5443602d89ed99aede2e4b7bf329daddeadb320e/Common/helper_cuda.h#L585-L598
-// Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
-#define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
 
 // Constants required for LLA to ECEF conversion
 // Values found here: https://en.wikipedia.org/wiki/World_Geodetic_System#WGS_84

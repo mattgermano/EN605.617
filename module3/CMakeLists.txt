@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.23)
 
 project(
     module3
-    LANGUAGES CUDA C
+    LANGUAGES CUDA
     VERSION 1.0.0
 )
 

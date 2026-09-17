@@ -1,10 +1,45 @@
 # Module 3 Assignment
 
-The following directory contains the source code for the Module 3 assignment.
+The following directory contains the source code and answers to the assignment
+questions for Module 3.
 
-## Build
+## Build and Run
 
-## Run
+The code is intended to be automatically built and run using the assignment
+runner. This can be accomplished by executing the following command from the
+root of the repository:
+
+```bash
+./assignment_build_execution/run_assignments.sh
+```
+
+The above command requires Python 3, uv, CMake, and CUDA/NVCC. The assignment
+runner executes the [`build.sh`](./build.sh) and [`run.sh`](./run.sh) scripts to
+build and run the project with different configurations.
+
+Alternatively, the code can be manually built using the following commands:
+
+```bash
+cd module3
+cmake -S . -B build -D CMAKE_BUILD_TYPE="Release"
+cmake --build build --parallel $(nproc --ignore=1)
+```
+
+If CMake isn't available, you can also run a simple `make` command from this
+directory:
+
+```bash
+make
+```
+
+It can then be run as follows:
+
+```bash
+./build/assignment.exe <total_threads> <block_size>
+
+# ...for example
+./build/assignment.exe 4194304 256
+```
 
 ## Branching Performance Comparison
 

@@ -23,9 +23,6 @@
 #include <string>
 #include <vector>
 
-// Maximum number of CUDA blocks in the X-dimension
-static constexpr long long MAX_BLOCKS = 2147483647LL;
-
 //!
 //! @brief Helper function for checking for CUDA errors
 //!
@@ -313,12 +310,18 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Get maximum grid size in X-dimension
+  int device_id = 0;
+  cudaDeviceProp prop{};
+  cudaGetDeviceProperties(&prop, device_id);
+  int max_grid_x = prop.maxGridSize[0];
+
   // Validate command line arguments
   long long num_blocks = cuda::ceil_div(total_threads, block_size);
-  if (num_blocks > MAX_BLOCKS) {
+  if (num_blocks > max_grid_x) {
     std::cerr << std::format(
         "Number of blocks ({}) is over the maximum of {}\n", num_blocks,
-        MAX_BLOCKS);
+        max_grid_x);
     return 1;
   }
 

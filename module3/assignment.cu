@@ -340,7 +340,7 @@ int main(int argc, char **argv) {
   std::cout << std::format("[+] Total blocks: {}\n", num_blocks);
   std::cout << std::format("[+] Threads per block: {}\n", block_size);
   std::cout << "[+] NOTE: Kernel execution time does not measure CPU/GPU "
-               "memory transfers\n";
+               "memory transfers\n\n";
 
   // ----------------------------------------------------------------
   // BEGIN: Initialize
@@ -384,9 +384,25 @@ int main(int argc, char **argv) {
   // does not use the payload field
   checkCudaErrors(
       cudaMemset(d_ecef, 0, total_threads * sizeof(ECEFCoordinate)));
+
+  // Create events to measure cudaMemcpy execution times
+  cudaEvent_t start_memcpy = nullptr, stop_memcpy = nullptr;
+  checkCudaErrors(cudaEventCreate(&start_memcpy));
+  checkCudaErrors(cudaEventCreate(&stop_memcpy));
+  float memcpy_elapsed_ms = 0.0f;
+
+  checkCudaErrors(cudaEventRecord(start_memcpy));
   checkCudaErrors(cudaMemcpy(d_lla, h_lla,
                              total_threads * sizeof(LLACoordinate),
                              cudaMemcpyHostToDevice));
+  checkCudaErrors(cudaEventRecord(stop_memcpy));
+  checkCudaErrors(cudaEventSynchronize(stop_memcpy));
+  checkCudaErrors(
+      cudaEventElapsedTime(&memcpy_elapsed_ms, start_memcpy, stop_memcpy));
+
+  std::stringstream h_to_d_memcpy;
+  h_to_d_memcpy << std::format("[*] host to device: {:.6f} ms\n",
+                               memcpy_elapsed_ms);
 
   // ----------------------------------------------------------------
   // END: Initialize
@@ -401,9 +417,18 @@ int main(int argc, char **argv) {
 
   std::cout << std::format("[+] gpu_lla2ecef: {:.6f} ms\n", gpu_elapsed_ms);
 
+  checkCudaErrors(cudaEventRecord(start_memcpy));
   checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
                              total_threads * sizeof(ECEFCoordinate),
                              cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaEventRecord(stop_memcpy));
+  checkCudaErrors(cudaEventSynchronize(stop_memcpy));
+  checkCudaErrors(
+      cudaEventElapsedTime(&memcpy_elapsed_ms, start_memcpy, stop_memcpy));
+
+  std::stringstream d_to_h_memcpy;
+  d_to_h_memcpy << std::format("[*] device to host: {:.6f} ms\n",
+                               memcpy_elapsed_ms);
 
   // ----------------------------------------------------------------
   // END: Execute the kernel on the GPU (non-branching)
@@ -509,11 +534,17 @@ int main(int argc, char **argv) {
   // BEGIN: Cleanup
   // ----------------------------------------------------------------
 
+  // Memcpy times
+  std::cout << "\n[*] CUDA memcpy times\n"
+            << h_to_d_memcpy.str() << d_to_h_memcpy.str();
+
   // Sanity check conversion results
   std::cout << "\n[*] Conversion results validation\n"
             << h_lla_input.str() << gpu_ecef_output.str()
             << cpu_ecef_output.str();
 
+  checkCudaErrors(cudaEventDestroy(start_memcpy));
+  checkCudaErrors(cudaEventDestroy(stop_memcpy));
   checkCudaErrors(cudaFreeHost(h_lla));
   checkCudaErrors(cudaFreeHost(h_ecef));
   checkCudaErrors(cudaFree(d_lla));

@@ -20,6 +20,7 @@
 #include <random>
 #include <source_location>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,7 @@ static constexpr double A = 6378137.0; // WGS-84 semi-major axis
 static constexpr double E2 =
     6.69437999014e-3; // WGS-84 first eccentricity squared
 static constexpr double DEG2RAD = std::numbers::pi / 180.0;
+static constexpr double RAD2DEG = 180.0 / std::numbers::pi;
 
 struct LLACoordinate {
   double lat_deg = 0.0;
@@ -146,7 +148,7 @@ void cpu_lla2ecef_branching(const LLACoordinate *lla, ECEFCoordinate *ecef,
       }
       payload = phi;
     }
-    ecef[i].payload = payload;
+    ecef[i].payload = payload * RAD2DEG;
   }
 }
 
@@ -220,7 +222,7 @@ __global__ void gpu_lla2ecef_branching(const LLACoordinate *__restrict__ lla,
     }
     payload = phi;
   }
-  ecef[thread_idx].payload = payload;
+  ecef[thread_idx].payload = payload * RAD2DEG;
 }
 
 //!
@@ -337,6 +339,8 @@ int main(int argc, char **argv) {
   std::cout << std::format("[+] Total threads: {}\n", total_threads);
   std::cout << std::format("[+] Total blocks: {}\n", num_blocks);
   std::cout << std::format("[+] Threads per block: {}\n", block_size);
+  std::cout << "[+] NOTE: Kernel execution time does not measure CPU/GPU "
+               "memory transfers\n";
 
   // ----------------------------------------------------------------
   // BEGIN: Initialize
@@ -376,7 +380,8 @@ int main(int argc, char **argv) {
 
   checkCudaErrors(cudaMalloc(&d_lla, total_threads * sizeof(LLACoordinate)));
   checkCudaErrors(cudaMalloc(&d_ecef, total_threads * sizeof(ECEFCoordinate)));
-  // Zeroing memory to initialize all elements
+  // Zeroing memory to initialize all elements since the non-branching kernel
+  // does not use the payload field
   checkCudaErrors(
       cudaMemset(d_ecef, 0, total_threads * sizeof(ECEFCoordinate)));
   checkCudaErrors(cudaMemcpy(d_lla, h_lla,
@@ -394,9 +399,7 @@ int main(int argc, char **argv) {
   float gpu_elapsed_ms =
       time_gpu_kernel(d_lla, d_ecef, total_threads, num_blocks, block_size);
 
-  std::cout << std::format("[+] Avg kernel execution time excluding copies "
-                           "(non-branching): {:.6f} ms\n",
-                           gpu_elapsed_ms);
+  std::cout << std::format("[+] gpu_lla2ecef: {:.6f} ms\n", gpu_elapsed_ms);
 
   checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
                              total_threads * sizeof(ECEFCoordinate),
@@ -416,9 +419,8 @@ int main(int argc, char **argv) {
   auto cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
 
-  std::cout << std::format(
-      "[+] CPU execution time (non-branching): {:.6f} ms\n",
-      cpu_elapsed_ms.count());
+  std::cout << std::format("[+] cpu_lla2ecef: {:.6f} ms\n",
+                           cpu_elapsed_ms.count());
 
   // ----------------------------------------------------------------
   // END: Execute the function on the CPU (non-branching)
@@ -431,8 +433,7 @@ int main(int argc, char **argv) {
   gpu_elapsed_ms = time_gpu_kernel(d_lla, d_ecef, total_threads, num_blocks,
                                    block_size, true);
 
-  std::cout << std::format("[+] Avg kernel execution time excluding copies "
-                           "(branching, sorted): {:.6f} ms\n",
+  std::cout << std::format("[+] gpu_lla2ecef_branching (sorted): {:.6f} ms\n",
                            gpu_elapsed_ms);
 
   checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
@@ -452,13 +453,22 @@ int main(int argc, char **argv) {
   gpu_elapsed_ms = time_gpu_kernel(d_lla, d_ecef, total_threads, num_blocks,
                                    block_size, true);
 
-  std::cout << std::format("[+] Avg kernel execution time excluding copies "
-                           "(branching, shuffled): {:.6f} ms\n",
+  std::cout << std::format("[+] gpu_lla2ecef_branching (shuffled): {:.6f} ms\n",
                            gpu_elapsed_ms);
 
   checkCudaErrors(cudaMemcpy(h_ecef, d_ecef,
                              total_threads * sizeof(ECEFCoordinate),
                              cudaMemcpyDeviceToHost));
+
+  std::stringstream h_lla_input;
+  h_lla_input << std::format(
+      "[*] {:>13}: lat_deg={:.3f}, lon_deg={:.3f}, alt_m={:.3f}\n", "h_lla[0]",
+      shuffled[0].lat_deg, shuffled[0].lon_deg, shuffled[0].alt_m);
+
+  std::stringstream gpu_ecef_output;
+  gpu_ecef_output << std::format(
+      "[*] gpu h_ecef[0]: x_m={:.3f}, y_m={:.3f}, z_m={:.3f}, lat_deg={:.3f}\n",
+      h_ecef[0].x_m, h_ecef[0].y_m, h_ecef[0].z_m, h_ecef[0].payload);
 
   // ----------------------------------------------------------------
   // END: Execute the kernel on the GPU (branching)
@@ -474,9 +484,8 @@ int main(int argc, char **argv) {
   cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
 
-  std::cout << std::format(
-      "[+] CPU execution time (branching, sorted): {:.6f} ms\n",
-      cpu_elapsed_ms.count());
+  std::cout << std::format("[+] cpu_lla2ecef_branching (sorted): {:.6f} ms\n",
+                           cpu_elapsed_ms.count());
 
   start_cpu = std::chrono::steady_clock::now();
   cpu_lla2ecef_branching(shuffled.data(), h_ecef, total_threads);
@@ -484,9 +493,13 @@ int main(int argc, char **argv) {
   cpu_elapsed_ms =
       std::chrono::duration<double, std::milli>(stop_cpu - start_cpu);
 
-  std::cout << std::format(
-      "[+] CPU execution time (branching, shuffled): {:.6f} ms\n",
-      cpu_elapsed_ms.count());
+  std::cout << std::format("[+] cpu_lla2ecef_branching (shuffled): {:.6f} ms\n",
+                           cpu_elapsed_ms.count());
+
+  std::stringstream cpu_ecef_output;
+  cpu_ecef_output << std::format(
+      "[*] cpu h_ecef[0]: x_m={:.3f}, y_m={:.3f}, z_m={:.3f}, lat_deg={:.3f}\n",
+      h_ecef[0].x_m, h_ecef[0].y_m, h_ecef[0].z_m, h_ecef[0].payload);
 
   // ----------------------------------------------------------------
   // END: Execute the function on the CPU (branching)
@@ -495,6 +508,11 @@ int main(int argc, char **argv) {
   // ----------------------------------------------------------------
   // BEGIN: Cleanup
   // ----------------------------------------------------------------
+
+  // Sanity check conversion results
+  std::cout << "\n[*] Conversion results validation\n"
+            << h_lla_input.str() << gpu_ecef_output.str()
+            << cpu_ecef_output.str();
 
   checkCudaErrors(cudaFreeHost(h_lla));
   checkCudaErrors(cudaFreeHost(h_ecef));

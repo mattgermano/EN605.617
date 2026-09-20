@@ -10,12 +10,35 @@ runner. This can be accomplished by executing the following command from the
 root of the repository:
 
 ```bash
+git clone https://github.com/mattgermano/EN605.617.git
+cd EN605.617
 ./assignment_build_execution/run_assignments.sh
 ```
 
-The above command requires Python 3, uv, CMake, and CUDA/NVCC. The assignment
-runner executes the [`build.sh`](./build.sh) and [`run.sh`](./run.sh) scripts to
-build and run the project with different configurations.
+The above command requires Python 3,
+[uv](https://docs.astral.sh/uv/getting-started/installation/), CMake, CUDA/NVCC,
+and g++. These dependencies can be installed on Ubuntu 26.04 using the following
+commands:
+
+```bash
+sudo apt update && sudo apt install -y wget build-essential cmake python3 git
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install -y cuda-toolkit-13-4
+wget -qO- https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+Also, ensure that `nvcc` is on your `PATH` via the following command:
+
+```bash
+export PATH="/usr/local/cuda/bin:$PATH"
+```
+
+The assignment runner executes the [`build.sh`](./build.sh) and
+[`run.sh`](./run.sh) scripts to build and run the project with different
+configurations.
 
 Alternatively, the code can be manually built using the following commands:
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.23)
+cmake_minimum_required(VERSION 3.24)
 
 project(
     module3
@@ -13,6 +13,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 add_executable(assignment.exe assignment.cu)
+set_property(TARGET assignment.exe PROPERTY CUDA_ARCHITECTURES native)
 
 # For a debug build, also enable debug symbols for device code (-G)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

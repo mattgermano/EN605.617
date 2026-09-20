@@ -43,6 +43,47 @@ It can then be run as follows:
 
 ## Branching Performance Comparison
 
+The following graph compares the CUDA kernel execution time (both non-branching
+and branching) across different block sizes. The execution times do not include
+the time to transfer the data to/from the CPU/GPU although it is important to
+keep in mind. The test used 4,194,304 data elements and total threads. As
+expected, the non-branching case executes the fastest since it does not need to
+conditionally run any extra instructions. The branching results are split based
+on whether the data was sorted or shuffled. In the sorted case, the input buffer
+was an array of LLA coordinates where 50% of the coordinates were in the
+northern hemisphere (i.e., latitude > 0) and 50% were in the southern hemisphere
+(i.e., latitude < 0). The kernel branch is executed for all the coordinates that
+have a latitude in the norther hemisphere. This results in a substantially
+longer execution time since additional FP64 instructions must execute. However,
+the data is sorted so all threads within in a warp either take the branch or
+don't. Measuring the performance of the same branching kernel after shuffling
+the data results in a nearly 2x performance degradation since a random number of
+northern/southern hemisphere coordinates are mixed within a warp. This causes a
+large warp divergance penalty. The execution time was largely consistent across
+block sizes since the application was memory bound and the total number of
+threads was still providing a high occupancy.
+
+![GPU ecef2lla](./img/gpu_ecef2lla.png)
+
+The following graph compares the CPU function execution time (both non-branching
+and branching). As expected, the branching case takes much longer to execute due
+to the additional instructions that must be executed. The shuffled version
+likely takes slightly longer since the data is randomly mixed and harder to
+branch predict.
+
+![CPU ecef2lla](./img/cpu_ecef2lla.png)
+
+I also profiled the application using Nsight Systems to view the results in a
+different way (and also because I was having fun learning about the tool). The
+image below shows a timeline for the kernel executions across the duration of
+the application. The first block are the non-branching kernels executing six
+times. The second block is the branching kernel executing on sorted data six
+times. The third block is the branching kernel executing on shuffled data six
+times. The event view table at the bottom shows the duration of each kernel
+execution.
+
+![Nsys report](./img/nsys_ui.png)
+
 ## Prior Submission Review
 
 The following sections identify good and bad qualities of the code provided in

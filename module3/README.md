@@ -6,8 +6,7 @@ questions for Module 3.
 ## Build and Run
 
 The code is intended to be automatically built and run using the assignment
-runner. This can be accomplished by executing the following command from the
-root of the repository:
+runner. This can be accomplished by executing the following commands:
 
 ```bash
 git clone https://github.com/mattgermano/EN605.617.git

@@ -9,7 +9,7 @@ CompileFlags:
 
   # Directory that contains compile_commands.json, or None when Nsight falls
   # back to generic CUDA flags.
-  CompilationDatabase: module3/build
+  CompilationDatabase: module5/build
 
   Add:
     # CUDA Toolkit selected for this workspace. These paths are explicit because
@@ -51,6 +51,7 @@ CompileFlags:
     - "-forward-unknown-to-host-compiler"
     - "-Werror=cross-execution-space-call"
     - "-allow-unsupported-compiler"
+    - "-arch=native"
 
 ---
 

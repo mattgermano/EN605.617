@@ -5,7 +5,7 @@
             "name": "CUDA C++: Launch",
             "type": "cuda-gdb",
             "request": "launch",
-            "program": "${workspaceFolder}/module3/build/assignment.exe"
+            "program": "${workspaceFolder}/module5/build/assignment.exe"
         }
     ]
 }

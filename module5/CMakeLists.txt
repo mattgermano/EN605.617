@@ -21,3 +21,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         $<$<COMPILE_LANGUAGE:CUDA>:-G -fdevice-sanitize=memcheck>
     )
 endif()
+
+add_custom_target(sanitizers
+    COMMAND compute-sanitizer --tool memcheck --error-exitcode 1 $<TARGET_FILE:assignment.exe>
+    COMMAND compute-sanitizer --tool initcheck --error-exitcode 1 $<TARGET_FILE:assignment.exe>
+    COMMAND compute-sanitizer --tool synccheck --error-exitcode 1 $<TARGET_FILE:assignment.exe>
+    COMMAND compute-sanitizer --tool racecheck --error-exitcode 1 $<TARGET_FILE:assignment.exe>
+    DEPENDS assignment.exe
+    COMMENT "Running compute-sanitizer"
+)

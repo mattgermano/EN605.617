@@ -34,12 +34,12 @@ static_assert(
 static constexpr int NUM_VALUES = (1 << 8);
 
 // The starting pixel value for each exposure bin. For example, if a pixel is
-// between 0 and 15 it falls into the first exposure bin, if it's between 16 and
-// 63 it falls into the next bin, etc.
+// between 0 and 17 it falls into the first exposure bin, if it's between 18 and
+// 65 it falls into the next bin, etc.
 static constexpr std::array<int, 5> BIN_STARTS = {0, 18, 66, 194, 242};
 static constexpr int NUM_BINS = static_cast<int>(BIN_STARTS.size());
 // The actual names corresponding to each of the bins. For example, a pixel
-// value between 16 and 63 maps to the "Shadows" exposure bin.
+// value between 18 and 65 maps to the "Shadows" exposure bin.
 static constexpr std::array<std::string, NUM_BINS> BIN_NAMES = {
     "Blacks", "Shadows", "Midtones", "Highlights", "Whites"};
 
@@ -48,6 +48,10 @@ static constexpr std::array<std::string, NUM_BINS> BIN_NAMES = {
 // exposure bin (BIN_NAMES[3]).
 // The memory is populated in execute_gpu_functions() using cudaMemcpyToSymbol()
 __constant__ std::uint8_t c_bin_lut[NUM_VALUES]; // NOLINT
+
+// Common function pointer type declaration shared between kernels
+using HistogramKernel = void (*)(const std::uint8_t *, unsigned int *,
+                                 std::size_t);
 
 //!
 //! @brief Helper function for checking for CUDA errors
@@ -224,7 +228,8 @@ bool parse_arguments(int argc, char **argv, long long &total_threads,
 
 //!
 //! @brief Counts the number of pixels in an image that are in each exposure bin
-//! using shared memory on the GPU.
+//! using shared memory, constant memory, global memory, and registers on the
+//! GPU.
 //!
 //! @param[in]  d_image    A 1-D array of 8-bit pixel values in the image
 //! @param[out] d_hist     A 1-D array counting the number of pixels in each bin
@@ -266,6 +271,31 @@ gpu_histogram_shared_mem(const std::uint8_t *const __restrict__ d_image,
 }
 
 //!
+//! @brief Counts the number of pixels in an image that are in each exposure bin
+//! using constant memory, global memory, and registers on the GPU.
+//!
+//! @param[in]  d_image    A 1-D array of 8-bit pixel values in the image
+//! @param[out] d_hist     A 1-D array counting the number of pixels in each bin
+//! @param[in]  num_pixels The total number of pixels in the image
+//!
+__global__ void
+gpu_histogram_global_mem(const std::uint8_t *const __restrict__ d_image,
+                         unsigned int *const __restrict__ d_hist,
+                         std::size_t num_pixels) {
+  // There will almost always be less total threads than pixels, so each thread
+  // needs to operate on multiple pixels in a grid-stride loop. The stride is
+  // the total number of threads in a grid.
+  std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+  for (std::size_t i =
+           static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       i < num_pixels; i += stride) {
+    // Get the current pixel, map it to an exposure bin using the lookup table,
+    // and increment the count for that bin in the output histogram
+    atomicAdd(&d_hist[c_bin_lut[d_image[i]]], 1u);
+  }
+}
+
+//!
 //! @brief Verifies the histogram was calculated correctly
 //!
 //! @param gpu_hist The histogram output from the GPU
@@ -298,6 +328,7 @@ bool verify_results(const std::vector<unsigned int> &gpu_hist,
 //!
 //! @brief Executes a kernel and measures its exeuction time
 //!
+//! @param[in] kernel      Function pointer for kernel to execute
 //! @param[in] name        An identifying name of the kernel being executed
 //! @param[in] d_image     The input image in device memory
 //! @param[in] d_hist      The output histogram in device memory
@@ -306,8 +337,8 @@ bool verify_results(const std::vector<unsigned int> &gpu_hist,
 //! @param[in] num_blocks  The number of blocks in the grid
 //! @return true if the results of the kernel are valid, else false
 //!
-bool benchmark_kernel(const std::string &name, const std::uint8_t *d_image,
-                      unsigned int *d_hist,
+bool benchmark_kernel(HistogramKernel kernel, const std::string &name,
+                      const std::uint8_t *d_image, unsigned int *d_hist,
                       const std::vector<unsigned int> &ref_hist,
                       long long block_size, long long num_blocks) {
   const dim3 grid(static_cast<unsigned int>(num_blocks));
@@ -316,7 +347,7 @@ bool benchmark_kernel(const std::string &name, const std::uint8_t *d_image,
   // "Warm-up" the kernel to mitigate the effects of lazy loading and
   // initialization.
   // https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html#impact-on-performance-measurements
-  gpu_histogram_shared_mem<<<grid, block>>>(d_image, d_hist, NUM_PIXELS);
+  kernel<<<grid, block>>>(d_image, d_hist, NUM_PIXELS);
   checkCudaErrors(cudaGetLastError());
   checkCudaErrors(cudaDeviceSynchronize());
   checkCudaErrors(cudaMemset(d_hist, 0, sizeof(unsigned int) * NUM_BINS));
@@ -327,7 +358,7 @@ bool benchmark_kernel(const std::string &name, const std::uint8_t *d_image,
   float gpu_elapsed_ms = 0.0f;
 
   checkCudaErrors(cudaEventRecord(start));
-  gpu_histogram_shared_mem<<<grid, block>>>(d_image, d_hist, NUM_PIXELS);
+  kernel<<<grid, block>>>(d_image, d_hist, NUM_PIXELS);
   checkCudaErrors(cudaGetLastError());
   checkCudaErrors(cudaEventRecord(stop));
   checkCudaErrors(cudaEventSynchronize(stop));
@@ -385,8 +416,12 @@ bool execute_gpu_functions(long long block_size, long long num_blocks) {
                              sizeof(std::uint8_t) * NUM_PIXELS,
                              cudaMemcpyHostToDevice));
 
-  bool passed = benchmark_kernel("Histogram Shared Memory Kernel", d_image,
+  bool passed = benchmark_kernel(gpu_histogram_shared_mem,
+                                 "Histogram Shared Memory Kernel", d_image,
                                  d_hist, ref_hist, block_size, num_blocks);
+  passed = passed && benchmark_kernel(gpu_histogram_global_mem,
+                                      "Histogram Global Memory Kernel", d_image,
+                                      d_hist, ref_hist, block_size, num_blocks);
 
   checkCudaErrors(cudaFreeHost(h_image));
   checkCudaErrors(cudaFree(d_image));

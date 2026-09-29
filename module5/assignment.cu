@@ -252,13 +252,15 @@ gpu_histogram_shared_mem(const std::uint8_t *const __restrict__ d_image,
   // There will almost always be less total threads than pixels, so each thread
   // needs to operate on multiple pixels in a grid-stride loop. The stride is
   // the total number of threads in a grid.
-  std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
-  for (std::size_t i =
-           static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-       i < num_pixels; i += stride) {
+  const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+  const std::size_t thread_idx =
+      static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  for (std::size_t i = thread_idx; i < num_pixels; i += stride) {
     // Get the current pixel, map it to an exposure bin using the lookup table,
     // and increment the count for that bin in the output histogram
-    atomicAdd(&s_hist[c_bin_lut[d_image[i]]], 1);
+    const std::uint8_t pixel = d_image[i];
+    const std::uint8_t bin = c_bin_lut[pixel];
+    atomicAdd(&s_hist[bin], 1);
   }
   __syncthreads();
 
@@ -285,13 +287,15 @@ gpu_histogram_global_mem(const std::uint8_t *const __restrict__ d_image,
   // There will almost always be less total threads than pixels, so each thread
   // needs to operate on multiple pixels in a grid-stride loop. The stride is
   // the total number of threads in a grid.
-  std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
-  for (std::size_t i =
-           static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-       i < num_pixels; i += stride) {
+  const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+  const std::size_t thread_idx =
+      static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  for (std::size_t i = thread_idx; i < num_pixels; i += stride) {
     // Get the current pixel, map it to an exposure bin using the lookup table,
     // and increment the count for that bin in the output histogram
-    atomicAdd(&d_hist[c_bin_lut[d_image[i]]], 1u);
+    const std::uint8_t pixel = d_image[i];
+    const std::uint8_t bin = c_bin_lut[pixel];
+    atomicAdd(&d_hist[bin], 1);
   }
 }
 

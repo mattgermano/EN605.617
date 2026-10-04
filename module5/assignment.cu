@@ -62,10 +62,6 @@ using HistogramKernel = void (*)(const std::uint8_t *, unsigned int *,
 inline void
 checkCudaErrors(cudaError_t result,
                 std::source_location loc = std::source_location::current()) {
-  // Reference documentation:
-  // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#error-checking-in-cuda
-  // Reference code:
-  // https://github.com/NVIDIA/cuda-samples/blob/5443602d89ed99aede2e4b7bf329daddeadb320e/Common/helper_cuda.h#L585-L598
   if (result != cudaSuccess) {
     std::cerr << std::format(
         "CUDA Runtime Error: {}:{}:{} = {}\n", loc.file_name(), loc.line(),
@@ -348,9 +344,8 @@ bool benchmark_kernel(HistogramKernel kernel, const std::string &name,
   const dim3 grid(static_cast<unsigned int>(num_blocks));
   const dim3 block(static_cast<unsigned int>(block_size));
 
-  // "Warm-up" the kernel to mitigate the effects of lazy loading and
-  // initialization.
-  // https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html#impact-on-performance-measurements
+  // Warm-up the kernel to mitigate the effects of lazy loading and
+  // initialization
   kernel<<<grid, block>>>(d_image, d_hist, NUM_PIXELS);
   checkCudaErrors(cudaGetLastError());
   checkCudaErrors(cudaDeviceSynchronize());
@@ -411,8 +406,6 @@ bool execute_gpu_functions(long long block_size, long long num_blocks) {
   checkCudaErrors(cudaMemset(d_hist, 0, sizeof(unsigned int) * NUM_BINS));
 
   // Copy the bin lookup table to constant memory
-  // Reference:
-  // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html#constant-memory
   checkCudaErrors(cudaMemcpyToSymbol(c_bin_lut, lut.data(), sizeof(c_bin_lut)));
 
   // Transfer the test image to GPU memory

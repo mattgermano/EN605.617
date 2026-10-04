@@ -20,6 +20,7 @@
 #include <limits>
 #include <source_location>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Image dimensions
@@ -185,7 +186,7 @@ bool set_block_dimensions(long long &total_threads, long long block_size,
         "The total number of threads will be rounded up to {}\n",
         total_threads);
   }
-  if (static_cast<std::size_t>(total_threads) > NUM_PIXELS) {
+  if (std::cmp_greater(total_threads, NUM_PIXELS)) {
     std::cout << "Warning: More threads than pixels\n";
   }
 

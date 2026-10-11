@@ -322,6 +322,22 @@ std::vector<StreamData> initialize_streams() {
 }
 
 //!
+//! @brief Cleans up the data associated with a stream
+//!
+//! @param[in] streams The vector of CUDA stream data
+//!
+void cleanup_streams(const std::vector<StreamData> &streams) {
+  for (auto &stream : streams) {
+    checkCufftErrors(cufftDestroy(stream.plan));
+    checkCudaErrors(cudaFree(stream.d_input));
+    checkCudaErrors(cudaFree(stream.d_output));
+    checkCudaErrors(cudaFree(stream.d_magnitude_db));
+    checkCudaErrors(cudaEventDestroy(stream.complete));
+    checkCudaErrors(cudaStreamDestroy(stream.stream));
+  }
+}
+
+//!
 //! @brief Initializes and benchmarks the CUDA streams
 //!
 //! @param[in] total_threads The total number of threads
@@ -365,16 +381,10 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
                              gpu_elapsed_ms, gpu_baseline_ms / gpu_elapsed_ms);
     passed = passed && verify_result(h_output, total_threads / FFT_SIZE);
   }
+  std::cout << "------------------------------------------------------\n";
 
   // Cleanup resources
-  for (auto &stream : streams) {
-    checkCufftErrors(cufftDestroy(stream.plan));
-    checkCudaErrors(cudaFree(stream.d_input));
-    checkCudaErrors(cudaFree(stream.d_output));
-    checkCudaErrors(cudaFree(stream.d_magnitude_db));
-    checkCudaErrors(cudaEventDestroy(stream.complete));
-    checkCudaErrors(cudaStreamDestroy(stream.stream));
-  }
+  cleanup_streams(streams);
   checkCudaErrors(cudaFreeHost(h_input));
   checkCudaErrors(cudaFreeHost(h_output));
 

@@ -58,9 +58,16 @@ static constexpr double BIN_WIDTH = SAMPLE_RATE_SPS / FFT_SIZE;
 static constexpr int EXPECTED_BIN =
     (static_cast<int>(TONE_FREQUENCY_HZ / BIN_WIDTH) + FFT_SIZE) % FFT_SIZE;
 
+// The FFT sums over each sample so it's necessary to divide by the FFT size to
+// restore the original amplitude. Multiplying by 2.0 is needed since the Hann
+// window reduces the peak amplitude by half.
 static constexpr float MAGNITUDE_SCALE = 2.0f / FFT_SIZE;
-constexpr float POWER_SCALE = MAGNITUDE_SCALE * MAGNITUDE_SCALE;
-constexpr float MIN_POWER = 1.0e-20f; // Prevents taking a log of 0
+static constexpr float POWER_SCALE = MAGNITUDE_SCALE * MAGNITUDE_SCALE;
+
+// Prevents taking a log of 0
+static constexpr float MIN_POWER = 1.0e-20f;
+// Peak magnitude must be within this threshold to be valid
+static constexpr float PEAK_THRESHOLD_DB = 0.1f;
 
 // Structure to store data associated with each stream. Each stream has its own
 // input/output buffers and events to signal completion.
@@ -95,10 +102,11 @@ __global__ void convert_and_window(const short2 *__restrict__ input,
   // Get the sample number within the FFT length
   int n = static_cast<int>(thread_idx % FFT_SIZE);
 
+  // Apply a Hann window which tapers the ends of the signal to 0. This is
+  // needed since an FFT assumes a signal is periodic where both ends of the
+  // signal are close in value. This is often not the case for a real signal.
   // Reference: https://pysdr.org/content/frequency_domain#windowing
-  // Apply a Hann window which is a very common windowing function.
-  // Formula:
-  // https://en.wikipedia.org/wiki/Window_function#Hann_window
+  // Formula: https://en.wikipedia.org/wiki/Window_function#Hann_window
   float w = 0.5f * (1.0f - std::cosf(2.0f * std::numbers::pi_v<float> *
                                      static_cast<float>(n) / FFT_SIZE));
 
@@ -182,7 +190,7 @@ bool verify_result(const float *magnitude, long long num_frames) {
 
     // Confirm peak is in the expected bin and is also at 0 dB. The signal was
     // scaled to -1.0 to 1.0 and 10log10(1.0) is 0 dB.
-    if (peak != EXPECTED_BIN || std::abs(m[peak]) > 0.1f) {
+    if (peak != EXPECTED_BIN || std::abs(m[peak]) > PEAK_THRESHOLD_DB) {
       std::cout << std::format(
           "Frame {}: Peak bin {} (Expected {}), Level {:.3f} dB\n", f, peak,
           EXPECTED_BIN, m[peak]);
@@ -336,8 +344,11 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
   // initialization
   benchmark_streams(streams, 1, h_input, h_output, num_chunks, block_size);
 
-  std::cout << std::format("{:>8} {:>10}\n", "Streams", "Time (ms)");
+  std::cout << "------------------------------------------------------\n";
+  std::cout << std::format("{:>8} {:>10} {:>8}\n", "Streams", "Time (ms)",
+                           "Speedup");
   bool passed = true;
+  float gpu_baseline_ms = 0.0f;
   for (int num_streams = 1; num_streams <= MAX_STREAMS; num_streams *= 2) {
     if (num_streams > num_chunks) {
       break;
@@ -347,7 +358,11 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
 
     float gpu_elapsed_ms = benchmark_streams(streams, num_streams, h_input,
                                              h_output, num_chunks, block_size);
-    std::cout << std::format("{:>8} {:>10.3f}\n", num_streams, gpu_elapsed_ms);
+    if (num_streams == 1) {
+      gpu_baseline_ms = gpu_elapsed_ms;
+    }
+    std::cout << std::format("{:>8} {:>10.3f} {:>7.2f}x\n", num_streams,
+                             gpu_elapsed_ms, gpu_baseline_ms / gpu_elapsed_ms);
     passed = passed && verify_result(h_output, total_threads / FFT_SIZE);
   }
 
@@ -421,13 +436,14 @@ int main(int argc, char **argv) {
 
   const long long num_chunks = total_threads / CHUNK_SAMPLES;
   const long long num_frames = total_threads / FFT_SIZE;
-  std::cout << std::format("[+] {} frames of {} samples in {} chunks\n",
+  std::cout << std::format("[+] Frames: {}, Samples/frame: {}, Chunks: {}\n",
                            num_frames, FFT_SIZE, num_chunks);
   std::cout << std::format(
       "[+] Sample rate: {:.3f} MHz, Bin width: {:.1f} Hz\n",
       SAMPLE_RATE_SPS / 1e6, BIN_WIDTH);
-  std::cout << std::format("[+] Tone: {:.1f} kHz (bin {})\n\n",
-                           TONE_FREQUENCY_HZ / 1e3, EXPECTED_BIN);
+  std::cout << std::format(
+      "[+] Tone Frequency: {:.1f} kHz, Frequency Bin: {}\n\n",
+      TONE_FREQUENCY_HZ / 1e3, EXPECTED_BIN);
 
   if (!execute_gpu_functions(total_threads, block_size, num_chunks)) {
     return EXIT_FAILURE;

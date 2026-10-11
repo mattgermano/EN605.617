@@ -157,6 +157,43 @@ void generate_signal(short2 *signal, std::size_t num_samps) {
 }
 
 //!
+//! @brief Verify the peak magnitude within each FFT of the input signal
+//! appears in the correct frequency bin
+//!
+//! @param magnitude  The array of signal magnitudes (in dB)
+//! @param num_frames The number of signal frames
+//! @return true if the peak resides in the correct frequency bin, else false
+//!
+bool verify_result(const float *magnitude, long long num_frames) {
+  bool passed = true;
+
+  // Loop through each frame and confirm the frequency bin within that frame
+  // with the max magnitude matches where the test signal was placed
+  for (long long f = 0; f < num_frames; ++f) {
+    const float *m = magnitude + f * FFT_SIZE;
+    int peak = 0;
+
+    for (int b = 1; b < FFT_SIZE; ++b) {
+      if (m[b] > m[peak]) {
+        // Found a bin with a new peak magnitude
+        peak = b;
+      }
+    }
+
+    // Confirm peak is in the expected bin and is also at 0 dB. The signal was
+    // scaled to -1.0 to 1.0 and 10log10(1.0) is 0 dB.
+    if (peak != EXPECTED_BIN || std::abs(m[peak]) > 0.1f) {
+      std::cout << std::format(
+          "Frame {}: Peak bin {} (Expected {}), Level {:.3f} dB\n", f, peak,
+          EXPECTED_BIN, m[peak]);
+      passed = false;
+    }
+  }
+
+  return passed;
+}
+
+//!
 //! @brief Executes the processing kernels for each chunk of input signal
 //!
 //! @param[in] streams     The vector of data associated with each stream
@@ -300,6 +337,7 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
   benchmark_streams(streams, 1, h_input, h_output, num_chunks, block_size);
 
   std::cout << std::format("{:>8} {:>10}\n", "Streams", "Time (ms)");
+  bool passed = true;
   for (int num_streams = 1; num_streams <= MAX_STREAMS; num_streams *= 2) {
     if (num_streams > num_chunks) {
       break;
@@ -310,6 +348,7 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
     float gpu_elapsed_ms = benchmark_streams(streams, num_streams, h_input,
                                              h_output, num_chunks, block_size);
     std::cout << std::format("{:>8} {:>10.3f}\n", num_streams, gpu_elapsed_ms);
+    passed = passed && verify_result(h_output, total_threads / FFT_SIZE);
   }
 
   // Cleanup resources
@@ -324,7 +363,7 @@ bool execute_gpu_functions(long long total_threads, long long block_size,
   checkCudaErrors(cudaFreeHost(h_input));
   checkCudaErrors(cudaFreeHost(h_output));
 
-  return true;
+  return passed;
 }
 
 //!

@@ -6,6 +6,8 @@ project(
     VERSION 1.0.0
 )
 
+find_package(CUDAToolkit REQUIRED)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CUDA_STANDARD 20)
@@ -13,6 +15,8 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 add_executable(assignment.exe assignment.cu)
+target_link_libraries(assignment.exe PRIVATE CUDA::cufft)
+target_include_directories(assignment.exe PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../common/inc)
 set_property(TARGET assignment.exe PROPERTY CUDA_ARCHITECTURES native)
 
 # For a debug build, also enable debug symbols for device code (-G)

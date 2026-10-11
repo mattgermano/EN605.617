@@ -30,6 +30,8 @@ CompileFlags:
     - -Wno-unknown-cuda-version
     - -Wno-pragma-system-header-outside-header
 
+    - -I/home/matt/dev/EN605.617/common/inc
+
   Remove:
     # Strip nvcc-only flags
     - -G

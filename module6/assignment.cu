@@ -122,15 +122,15 @@ __global__ void convert_and_window(const short2 *__restrict__ input,
 //!
 //! @param[in]  spectrum      The complex FFT output
 //! @param[out] magnitude_db  The magnitudes of each frequency bin in dB
-//! @param[in]  num_samps     The number of frequency bins
+//! @param[in]  count         The number of frequency bins
 //!
 __global__ void compute_magnitude_db(const cufftComplex *__restrict__ spectrum,
                                      float *__restrict__ magnitude_db,
-                                     std::size_t num_samps) {
+                                     std::size_t count) {
   std::size_t thread_idx =
       static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-  if (thread_idx >= num_samps) {
+  if (thread_idx >= count) {
     return;
   }
 

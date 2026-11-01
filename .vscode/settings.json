@@ -6,7 +6,7 @@
     "doxdocgen.c.firstLine": "//!",
     "doxdocgen.c.lastLine": "//!",
     "C_Cpp.intelliSenseEngine": "disabled",
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/module6/build/compile_commands.json",
-    "cmake.sourceDirectory": "${workspaceFolder}/module6",
-    "cmake.buildDirectory": "${workspaceFolder}/module6/build"
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/module9/assignment/build/compile_commands.json",
+    "cmake.sourceDirectory": "${workspaceFolder}/module9/assignment",
+    "cmake.buildDirectory": "${workspaceFolder}/module9/assignment/build"
 }

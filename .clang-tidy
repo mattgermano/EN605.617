@@ -16,6 +16,7 @@ Checks:
   - -cppcoreguidelines-avoid-c-arrays
   - -cppcoreguidelines-pro-bounds-constant-array-index
   - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - -misc-use-anonymous-namespace
 WarningsAsErrors: ''
 HeaderFileExtensions:
   - ''

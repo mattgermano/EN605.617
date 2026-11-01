@@ -4,8 +4,10 @@
 #include <cuda/cmath>
 #include <cuda_runtime.h>
 #include <cufft.h>
+#include <curand.h>
 #include <format>
 #include <iostream>
+#include <npp.h>
 #include <source_location>
 
 //!
@@ -37,6 +39,40 @@ checkCufftErrors(cufftResult result,
                  std::source_location loc = std::source_location::current()) {
   if (result != CUFFT_SUCCESS) {
     std::cerr << std::format("cuFFT Error: {}:{}:{}\n", loc.file_name(),
+                             loc.line(), static_cast<int>(result));
+    cudaDeviceReset();
+    exit(EXIT_FAILURE);
+  }
+}
+
+//!
+//! @brief Helper function for checking for cuRAND errors
+//!
+//! @param[in] result The result of a cuRAND API call
+//! @param[in] loc    The source code location of the function call
+//!
+inline void
+checkCurandErrors(curandStatus_t result,
+                  std::source_location loc = std::source_location::current()) {
+  if (result != CURAND_STATUS_SUCCESS) {
+    std::cerr << std::format("cuRAND Error: {}:{}:{}\n", loc.file_name(),
+                             loc.line(), static_cast<int>(result));
+    cudaDeviceReset();
+    exit(EXIT_FAILURE);
+  }
+}
+
+//!
+//! @brief Helper function for checking for NPP errors
+//!
+//! @param[in] result The result of an NPP call
+//! @param[in] loc    The source code location of the function call
+//!
+inline void
+checkNppErrors(NppStatus result,
+               std::source_location loc = std::source_location::current()) {
+  if (result < NPP_SUCCESS) {
+    std::cerr << std::format("NPP Error: {}:{}:{}\n", loc.file_name(),
                              loc.line(), static_cast<int>(result));
     cudaDeviceReset();
     exit(EXIT_FAILURE);

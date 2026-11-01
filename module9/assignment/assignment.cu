@@ -65,6 +65,12 @@ static constexpr int FLOAT_STEP = WIDTH * sizeof(float);
 static constexpr std::size_t IMAGE_BYTES = NUM_PIXELS * sizeof(float);
 static constexpr NppiSize IMAGE_SIZE = {.width = WIDTH, .height = HEIGHT};
 
+// SNR needed to consider a star visible. A value of 5 is called the Rose
+// Criterion: "An SNR less than 5 means less than 100% certainty in identifying
+// image details"
+// https://en.wikipedia.org/wiki/Signal-to-noise_ratio#Alternative_definition
+static constexpr float DETECTION_SNR = 5.0f;
+
 // Directory the output images are written to if one isn't given
 static constexpr const char *DEFAULT_OUTPUT_DIR = "output";
 
@@ -76,6 +82,8 @@ struct Simulation {
 
   // Device memory
   float *d_star_random = nullptr; // Random numbers for the stars
+  int *d_star_x = nullptr;        // Star x pixel coordinates
+  int *d_star_y = nullptr;        // Star y pixel coordinates
   float *d_points = nullptr;      // Stars as bright pixels
   float *d_truth = nullptr;       // Noise-free sky
   float *d_noise = nullptr;       // Random noise for one exposure
@@ -83,6 +91,8 @@ struct Simulation {
   float *d_sum = nullptr;         // Running total of all exposures
   float *d_stack = nullptr;       // The average of all exposures so far
   uint8_t *d_display = nullptr;   // 8-bit image for saving to a file
+  Npp8u *d_npp_buffer = nullptr;  // Buffer space for NPP statistics
+  Npp64f *d_stats = nullptr;      // Mean and standard deviation results
 
   // Directory the output images are written to
   std::filesystem::path output_dir = DEFAULT_OUTPUT_DIR;
@@ -93,8 +103,11 @@ struct Simulation {
 //!
 //! @param[in]  random 3 random numbers per star (x pos, y pos, and brightness)
 //! @param[out] image  The image to draw the stars in
+//! @param[out] star_x The x pixel coordinate of each star
+//! @param[out] star_y The y pixel coordinate of each star
 //!
-__global__ void plot_stars_kernel(const float *random, float *image) {
+__global__ void plot_stars_kernel(const float *random, float *image,
+                                  int *star_x, int *star_y) {
   const unsigned int star = blockIdx.x * blockDim.x + threadIdx.x;
   if (star >= NUM_STARS) {
     return;
@@ -112,6 +125,8 @@ __global__ void plot_stars_kernel(const float *random, float *image) {
                                       random[3 * star + 2]);
 
   atomicAdd(&image[y * WIDTH + x], brightness);
+  star_x[star] = x;
+  star_y[star] = y;
 }
 
 //!
@@ -204,6 +219,8 @@ static Simulation create_simulation() {
 
   checkCudaErrors(
       cudaMalloc(&sim.d_star_random, 3UL * NUM_STARS * sizeof(float)));
+  checkCudaErrors(cudaMalloc(&sim.d_star_x, NUM_STARS * sizeof(int)));
+  checkCudaErrors(cudaMalloc(&sim.d_star_y, NUM_STARS * sizeof(int)));
   checkCudaErrors(cudaMalloc(&sim.d_points, IMAGE_BYTES));
   checkCudaErrors(cudaMalloc(&sim.d_truth, IMAGE_BYTES));
   checkCudaErrors(cudaMalloc(&sim.d_noise, IMAGE_BYTES));
@@ -211,6 +228,13 @@ static Simulation create_simulation() {
   checkCudaErrors(cudaMalloc(&sim.d_sum, IMAGE_BYTES));
   checkCudaErrors(cudaMalloc(&sim.d_stack, IMAGE_BYTES));
   checkCudaErrors(cudaMalloc(&sim.d_display, NUM_PIXELS));
+  checkCudaErrors(cudaMalloc(&sim.d_stats, 2 * sizeof(Npp64f)));
+
+  std::size_t npp_buffer_size = 0;
+  checkNppErrors(nppiMeanStdDevGetBufferHostSize_32f_C1R_Ctx(
+      IMAGE_SIZE, &npp_buffer_size, sim.npp_ctx));
+  checkCudaErrors(cudaMalloc(&sim.d_npp_buffer, npp_buffer_size));
+
   return sim;
 }
 
@@ -222,6 +246,8 @@ static Simulation create_simulation() {
 static void cleanup_simulation(Simulation &sim) {
   checkCurandErrors(curandDestroyGenerator(sim.generator));
   checkCudaErrors(cudaFree(sim.d_star_random));
+  checkCudaErrors(cudaFree(sim.d_star_x));
+  checkCudaErrors(cudaFree(sim.d_star_y));
   checkCudaErrors(cudaFree(sim.d_points));
   checkCudaErrors(cudaFree(sim.d_truth));
   checkCudaErrors(cudaFree(sim.d_noise));
@@ -229,8 +255,64 @@ static void cleanup_simulation(Simulation &sim) {
   checkCudaErrors(cudaFree(sim.d_sum));
   checkCudaErrors(cudaFree(sim.d_stack));
   checkCudaErrors(cudaFree(sim.d_display));
+  checkCudaErrors(cudaFree(sim.d_npp_buffer));
+  checkCudaErrors(cudaFree(sim.d_stats));
   checkCudaErrors(cudaStreamDestroy(sim.stream));
   sim = Simulation{};
+}
+
+//!
+//! @brief Finds the peak brightness of each star. This is used to check how
+//! many stars are visible at different exposure counts.
+//!
+//! @param[in] sim The GPU resources
+//! @return The peak brightness of each star above the sky
+//!
+std::vector<float> find_star_peaks(const Simulation &sim) {
+  // Not using cudaMallocHost since this is just for debugging information
+  std::vector<float> h_truth(NUM_PIXELS);
+  std::vector<int> h_star_x(NUM_STARS);
+  std::vector<int> h_star_y(NUM_STARS);
+  checkCudaErrors(cudaMemcpyAsync(h_truth.data(), sim.d_truth, IMAGE_BYTES,
+                                  cudaMemcpyDeviceToHost, sim.stream));
+  checkCudaErrors(cudaMemcpyAsync(h_star_x.data(), sim.d_star_x,
+                                  NUM_STARS * sizeof(int),
+                                  cudaMemcpyDeviceToHost, sim.stream));
+  checkCudaErrors(cudaMemcpyAsync(h_star_y.data(), sim.d_star_y,
+                                  NUM_STARS * sizeof(int),
+                                  cudaMemcpyDeviceToHost, sim.stream));
+  checkCudaErrors(cudaStreamSynchronize(sim.stream));
+
+  std::vector<float> star_peaks(NUM_STARS);
+  // Loop through each star and retrieve the pixel value at its center
+  for (int s = 0; s < NUM_STARS; s++) {
+    star_peaks[s] = h_truth[h_star_y[s] * WIDTH + h_star_x[s]] - SKY_BACKGROUND;
+  }
+
+  return star_peaks;
+}
+
+//!
+//! @brief Calculates the mean and standard deviation of an image with NPP
+//!
+//! @param[in]  sim     The GPU resources
+//! @param[in]  d_image The image
+//! @param[out] mean    The mean of all pixels
+//! @param[out] std_dev The standard deviation of all pixels
+//!
+void mean_std_dev(const Simulation &sim, const float *d_image, double &mean,
+                  double &std_dev) {
+  checkNppErrors(nppiMean_StdDev_32f_C1R_Ctx(d_image, FLOAT_STEP, IMAGE_SIZE,
+                                             sim.d_npp_buffer, &sim.d_stats[0],
+                                             &sim.d_stats[1], sim.npp_ctx));
+
+  std::array<Npp64f, 2> h_stats{};
+  checkCudaErrors(cudaMemcpyAsync(h_stats.data(), sim.d_stats, sizeof(h_stats),
+                                  cudaMemcpyDeviceToHost, sim.stream));
+  checkCudaErrors(cudaStreamSynchronize(sim.stream));
+
+  mean = h_stats[0];
+  std_dev = h_stats[1];
 }
 
 //!
@@ -284,8 +366,8 @@ static void render_truth(const Simulation &sim) {
 
   checkCudaErrors(cudaMemsetAsync(sim.d_points, 0, IMAGE_BYTES, sim.stream));
   const dim3 grid(cuda::ceil_div(NUM_STARS, BLOCK_SIZE));
-  plot_stars_kernel<<<grid, BLOCK_SIZE, 0, sim.stream>>>(sim.d_star_random,
-                                                         sim.d_points);
+  plot_stars_kernel<<<grid, BLOCK_SIZE, 0, sim.stream>>>(
+      sim.d_star_random, sim.d_points, sim.d_star_x, sim.d_star_y);
   checkCudaErrors(cudaGetLastError());
 
   // Blur each star into a round blob using a gaussian blur
@@ -336,7 +418,7 @@ static void save_stack(const Simulation &sim, int exposures) {
 
   const std::string filename = std::format("stack_{:02}.pgm", exposures);
   save_image(sim, sim.d_stack, filename);
-  std::cout << std::format("Saved {} ({} exposure{} stacked)\n", filename,
+  std::cout << std::format("Saved {} ({} exposure{} stacked) ", filename,
                            exposures, exposures == 1 ? "" : "s");
 }
 
@@ -346,7 +428,8 @@ static void save_stack(const Simulation &sim, int exposures) {
 //!
 //! @param[in] sim The GPU resources
 //!
-static void stack_exposures(const Simulation &sim) {
+static void stack_exposures(const Simulation &sim,
+                            const std::vector<float> &star_peaks) {
   checkCudaErrors(cudaMemsetAsync(sim.d_sum, 0, IMAGE_BYTES, sim.stream));
 
   for (int frames = 1; frames <= MAX_FRAMES; frames++) {
@@ -354,6 +437,23 @@ static void stack_exposures(const Simulation &sim) {
 
     if (std::ranges::find(EXPOSURE_COUNTS, frames) != EXPOSURE_COUNTS.end()) {
       save_stack(sim, frames);
+
+      // Subtract the noise-free image from the stack to get just the noise
+      checkNppErrors(nppiSub_32f_C1IR_Ctx(sim.d_truth, FLOAT_STEP, sim.d_stack,
+                                          FLOAT_STEP, IMAGE_SIZE, sim.npp_ctx));
+
+      // Determine how many stars are visible above the noise (standard
+      // deviation of the image)
+      double noise_mean = 0.0;
+      double noise = 0.0;
+      mean_std_dev(sim, sim.d_stack, noise_mean, noise);
+
+      const auto visible =
+          std::count_if(star_peaks.begin(), star_peaks.end(), [&](float peak) {
+            return peak > DETECTION_SNR * noise;
+          });
+
+      std::cout << std::format("({}/{} stars visible)\n", visible, NUM_STARS);
     }
   }
 }
@@ -375,7 +475,8 @@ int main(int argc, char *argv[]) {
 
   render_truth(sim);
   std::cout << "Saved truth.pgm (noise-free sky)\n";
-  stack_exposures(sim);
+  const std::vector<float> star_peaks = find_star_peaks(sim);
+  stack_exposures(sim, star_peaks);
   std::cout << std::format("\nImages written to {}/\n",
                            sim.output_dir.string());
 

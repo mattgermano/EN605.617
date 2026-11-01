@@ -15,7 +15,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 add_executable(assignment.exe assignment.cu)
-target_link_libraries(assignment.exe PRIVATE CUDA::curand CUDA::nppc CUDA::nppial CUDA::nppif)
+target_link_libraries(assignment.exe PRIVATE CUDA::curand CUDA::nppc CUDA::nppial CUDA::nppif CUDA::nppist)
 target_include_directories(assignment.exe PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../common/inc)
 set_property(TARGET assignment.exe PROPERTY CUDA_ARCHITECTURES native)
 
